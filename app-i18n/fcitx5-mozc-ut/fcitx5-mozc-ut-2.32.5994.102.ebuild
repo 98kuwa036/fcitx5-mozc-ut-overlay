@@ -49,7 +49,7 @@ BDEPEND="
 
 RDEPEND="
 	>=app-i18n/fcitx-5.0.0:5
-	dev-libs/abseil-cpp:=
+	dev-cpp/abseil-cpp:=
 	dev-libs/protobuf:=
 	emacs? ( app-editors/emacs:* )
 	gui? (
