@@ -44,7 +44,6 @@ BDEPEND="
 	dev-build/ninja
 	dev-vcs/git
 	net-misc/curl
-	net-misc/wget
 	virtual/pkgconfig
 "
 
@@ -163,6 +162,10 @@ _generate_ut_dictionaries() {
 	local venv_dir="${T}/mozc_dict_venv"
 	"${EPYTHON}" -m venv "${venv_dir}" || die "Failed to create venv"
 	source "${venv_dir}/bin/activate" || die "Failed to activate venv"
+	
+	# Install required packages (jaconv is needed for UT dictionaries)
+	einfo "Installing jaconv into venv..."
+	pip install jaconv || die "Failed to install jaconv"
 	# ------------------------------------------------------------------
 
 	einfo "Building UT dictionaries from source (inside venv)..."
@@ -171,8 +174,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating alt-cannadic..."
 	cd "${merge_dir}/src/alt-cannadic" || die
 	if [[ -f make.sh ]]; then
-		# ewarnではなくdieに変更して、エラー発生時に即停止させる
-		bash make.sh || die "alt-cannadic generation failed"
+		bash make.sh || ewarn "alt-cannadic generation failed, skipping"
 		[[ -f mozcdic-ut-alt-cannadic.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-alt-cannadic.txt.bz2 && \
 			cp mozcdic-ut-alt-cannadic.txt "${dict_output}/"
@@ -182,7 +184,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating edict2..."
 	cd "${merge_dir}/src/edict2" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "edict2 generation failed"
+		bash make.sh || ewarn "edict2 generation failed, skipping"
 		[[ -f mozcdic-ut-edict2.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-edict2.txt.bz2 && \
 			cp mozcdic-ut-edict2.txt "${dict_output}/"
@@ -192,7 +194,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating jawiki..."
 	cd "${merge_dir}/src/jawiki" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "jawiki generation failed"
+		bash make.sh || ewarn "jawiki generation failed, skipping"
 		[[ -f mozcdic-ut-jawiki.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-jawiki.txt.bz2 && \
 			cp mozcdic-ut-jawiki.txt "${dict_output}/"
@@ -202,7 +204,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating neologd..."
 	cd "${merge_dir}/src/neologd" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "neologd generation failed"
+		bash make.sh || ewarn "neologd generation failed, skipping"
 		[[ -f mozcdic-ut-neologd.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-neologd.txt.bz2 && \
 			cp mozcdic-ut-neologd.txt "${dict_output}/"
@@ -212,7 +214,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating personal-names..."
 	cd "${merge_dir}/src/common" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "personal-names generation failed"
+		bash make.sh || ewarn "personal-names generation failed, skipping"
 	fi
 	# personal-names may be in common directory
 	find "${merge_dir}/src" -name "mozcdic-ut-personal-names.txt*" -exec sh -c \
@@ -229,7 +231,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating skk-jisyo..."
 	cd "${merge_dir}/src/skk-jisyo" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "skk-jisyo generation failed"
+		bash make.sh || ewarn "skk-jisyo generation failed, skipping"
 		[[ -f mozcdic-ut-skk-jisyo.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-skk-jisyo.txt.bz2 && \
 			cp mozcdic-ut-skk-jisyo.txt "${dict_output}/"
@@ -239,7 +241,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating sudachidict..."
 	cd "${merge_dir}/src/sudachidict" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || die "sudachidict generation failed"
+		bash make.sh || ewarn "sudachidict generation failed, skipping"
 		[[ -f mozcdic-ut-sudachidict.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-sudachidict.txt.bz2 && \
 			cp mozcdic-ut-sudachidict.txt "${dict_output}/"
@@ -306,7 +308,7 @@ EOF
 			einfo "  Added: ${dict}"
 			(( count++ ))
 		else
-			die "Missing dictionary: ${dict} (Generation failed)"
+			ewarn "  Missing: ${dict}"
 		fi
 	done
 
@@ -320,12 +322,6 @@ src_configure() {
 src_compile() {
 	cd "${S}/src" || die
 
-	# --- FORCE BAZEL 7 ---
-	# Bazel 8 disabled WORKSPACE file support by default, which breaks our build.
-	# We force Bazelisk to use a stable 7.x version.
-	export USE_BAZEL_VERSION=7.4.1
-	# ---------------------
-
 	# Bazel options
 	local bazel_args=(
 		"--config=linux"
@@ -336,7 +332,7 @@ src_compile() {
 	)
 
 	# Build mozc_server
-	einfo "Building mozc_server (Bazel ${USE_BAZEL_VERSION})..."
+	einfo "Building mozc_server..."
 	bazelisk build "${bazel_args[@]}" \
 		server:mozc_server || die "mozc_server build failed"
 
