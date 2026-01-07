@@ -15,6 +15,10 @@ else
 	MOZC_TAG="${PV}"
 fi
 
+# ★重要: Bazel 8以降の破壊的変更(Bzlmod強制)を回避するため、
+# 安定してビルドできる 7.x 系を明示的に指定します。
+export USE_BAZEL_VERSION=7.4.1
+
 DESCRIPTION="Mozc with Fcitx5 support and all UT dictionaries (fully built from source)"
 HOMEPAGE="
 	https://github.com/google/mozc
@@ -165,6 +169,7 @@ _generate_ut_dictionaries() {
 	
 	# Install required packages (jaconv is needed for UT dictionaries)
 	einfo "Installing jaconv into venv..."
+	pip install --upgrade pip
 	pip install jaconv || die "Failed to install jaconv"
 	# ------------------------------------------------------------------
 
@@ -174,7 +179,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating alt-cannadic..."
 	cd "${merge_dir}/src/alt-cannadic" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "alt-cannadic generation failed, skipping"
+		bash make.sh || die "alt-cannadic generation failed"
 		[[ -f mozcdic-ut-alt-cannadic.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-alt-cannadic.txt.bz2 && \
 			cp mozcdic-ut-alt-cannadic.txt "${dict_output}/"
@@ -184,7 +189,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating edict2..."
 	cd "${merge_dir}/src/edict2" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "edict2 generation failed, skipping"
+		bash make.sh || die "edict2 generation failed"
 		[[ -f mozcdic-ut-edict2.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-edict2.txt.bz2 && \
 			cp mozcdic-ut-edict2.txt "${dict_output}/"
@@ -194,7 +199,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating jawiki..."
 	cd "${merge_dir}/src/jawiki" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "jawiki generation failed, skipping"
+		bash make.sh || die "jawiki generation failed"
 		[[ -f mozcdic-ut-jawiki.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-jawiki.txt.bz2 && \
 			cp mozcdic-ut-jawiki.txt "${dict_output}/"
@@ -204,7 +209,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating neologd..."
 	cd "${merge_dir}/src/neologd" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "neologd generation failed, skipping"
+		bash make.sh || die "neologd generation failed"
 		[[ -f mozcdic-ut-neologd.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-neologd.txt.bz2 && \
 			cp mozcdic-ut-neologd.txt "${dict_output}/"
@@ -214,14 +219,13 @@ _generate_ut_dictionaries() {
 	einfo "  Generating personal-names..."
 	cd "${merge_dir}/src/common" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "personal-names generation failed, skipping"
+		bash make.sh || die "personal-names generation failed"
 	fi
 	# personal-names may be in common directory
 	find "${merge_dir}/src" -name "mozcdic-ut-personal-names.txt*" -exec sh -c \
 		'f="{}"; [[ "$f" == *.bz2 ]] && bunzip2 -kf "$f"; cp "${f%.bz2}" "'"${dict_output}"'/" 2>/dev/null' \;
 
 	# Generate place-names with jigyosyo support (our custom version)
-	# Note: This calls a function that uses EPYTHON. It should run fine inside venv.
 	einfo "  Generating place-names (with jigyosyo)..."
 	local place_names_file
 	place_names_file=$(_generate_place_names "${WORKDIR}")
@@ -231,7 +235,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating skk-jisyo..."
 	cd "${merge_dir}/src/skk-jisyo" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "skk-jisyo generation failed, skipping"
+		bash make.sh || die "skk-jisyo generation failed"
 		[[ -f mozcdic-ut-skk-jisyo.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-skk-jisyo.txt.bz2 && \
 			cp mozcdic-ut-skk-jisyo.txt "${dict_output}/"
@@ -241,7 +245,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating sudachidict..."
 	cd "${merge_dir}/src/sudachidict" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "sudachidict generation failed, skipping"
+		bash make.sh || die "sudachidict generation failed"
 		[[ -f mozcdic-ut-sudachidict.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-sudachidict.txt.bz2 && \
 			cp mozcdic-ut-sudachidict.txt "${dict_output}/"
@@ -275,8 +279,8 @@ src_prepare() {
 	fi
 
 	# --- Fix: Add fcitx5 repository definition to WORKSPACE ---
-	# This fixes the "no such package '@@[unknown repo 'fcitx5' requested from @@]//'" error
 	einfo "Updating WORKSPACE with fcitx5 repository definition..."
+	# Bazel 7.x 以前であれば WORKSPACE ファイルへの追記が有効です
 	cat >> "${S}/src/WORKSPACE" <<EOF
 new_local_repository(
     name = "fcitx5",
@@ -337,7 +341,6 @@ src_compile() {
 		server:mozc_server || die "mozc_server build failed"
 
 	# Build fcitx5 module
-	# Fix: Target must include .so extension
 	einfo "Building fcitx5 module..."
 	bazelisk build "${bazel_args[@]}" \
 		unix/fcitx5:fcitx5-mozc.so || die "fcitx5-mozc.so build failed"
