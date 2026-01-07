@@ -8,7 +8,12 @@ PYTHON_COMPAT=( python3_{11..13} )
 inherit check-reqs cmake desktop python-any-r1 xdg
 
 # Mozc version tag to checkout
-MOZC_TAG="${PV}"
+# 9999 (Live ebuild) の場合は master を使うように分岐
+if [[ ${PV} == *9999* ]]; then
+	MOZC_TAG="master"
+else
+	MOZC_TAG="${PV}"
+fi
 
 DESCRIPTION="Mozc with Fcitx5 support and all UT dictionaries (fully built from source)"
 HOMEPAGE="
@@ -27,11 +32,13 @@ LICENSE="BSD-3 Apache-2.0 CC-BY-SA-4.0 GPL-2+ LGPL-2.1+ MIT public-domain"
 SLOT="0"
 KEYWORDS="~amd64"
 IUSE="emacs gui renderer test"
-RESTRICT="!test? ( test ) network-sandbox"
+
+# network-sandbox を削除し、mirror のみに制限 (bazeliskと辞書DLのため通信必須)
+RESTRICT="!test? ( test ) mirror"
 
 BDEPEND="
 	${PYTHON_DEPS}
-	>=dev-build/bazel-6.4.0
+	dev-build/bazelisk
 	app-arch/unzip
 	app-arch/bzip2
 	dev-build/ninja
@@ -75,7 +82,7 @@ pkg_setup() {
 
 src_unpack() {
 	# Clone Google Mozc from source
-	einfo "Cloning Google Mozc (tag: ${MOZC_TAG})..."
+	einfo "Cloning Google Mozc (tag/branch: ${MOZC_TAG})..."
 	git clone --depth 1 --branch "${MOZC_TAG}" \
 		https://github.com/google/mozc.git \
 		"${WORKDIR}/mozc" || die "Failed to clone Google Mozc"
@@ -281,6 +288,7 @@ src_configure() {
 src_compile() {
 	cd "${S}/src" || die
 
+	# Bazel options
 	local bazel_args=(
 		"--config=linux"
 		"--compilation_mode=opt"
@@ -288,33 +296,37 @@ src_compile() {
 		"--host_copt=-Wno-error"
 		"--jobs=$(nproc)"
 	)
+	
+	# Bazeliskは自動的に .bazelversion を読みますが、
+	# 必要に応じて環境変数でバージョンを強制することも可能です。
+	# export USE_BAZEL_VERSION=7.0.0
 
 	# Build mozc_server
 	einfo "Building mozc_server..."
-	bazel build "${bazel_args[@]}" \
+	bazelisk build "${bazel_args[@]}" \
 		server:mozc_server || die "mozc_server build failed"
 
 	# Build fcitx5 module
 	einfo "Building fcitx5 module..."
-	bazel build "${bazel_args[@]}" \
+	bazelisk build "${bazel_args[@]}" \
 		unix/fcitx5:fcitx5-mozc || die "fcitx5-mozc build failed"
 
 	# Build optional components
 	if use emacs; then
 		einfo "Building emacs helper..."
-		bazel build "${bazel_args[@]}" \
+		bazelisk build "${bazel_args[@]}" \
 			unix/emacs:mozc_emacs_helper || die
 	fi
 
 	if use gui; then
 		einfo "Building mozc_tool..."
-		bazel build "${bazel_args[@]}" \
+		bazelisk build "${bazel_args[@]}" \
 			gui/tool:mozc_tool || die
 	fi
 
 	if use renderer; then
 		einfo "Building mozc_renderer..."
-		bazel build "${bazel_args[@]}" \
+		bazelisk build "${bazel_args[@]}" \
 			renderer:mozc_renderer || die
 	fi
 }
@@ -389,7 +401,7 @@ pkg_postinst() {
 	elog "Mozc with fcitx5 support and UT dictionaries has been installed."
 	elog ""
 	elog "This package is FULLY built from source:"
-	elog "  - Google Mozc: cloned from git (tag: ${MOZC_TAG})"
+	elog "  - Google Mozc: cloned from git (tag/branch: ${MOZC_TAG})"
 	elog "  - Fcitx5 patches: cloned from fcitx/mozc"
 	elog "  - All UT dictionaries: generated from source"
 	elog ""
