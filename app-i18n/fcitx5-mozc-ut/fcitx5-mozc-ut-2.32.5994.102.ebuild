@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Gentoo Authors
+# Copyright 2024-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
@@ -7,27 +7,21 @@ PYTHON_COMPAT=( python3_{11..13} )
 
 inherit check-reqs cmake desktop python-any-r1 xdg
 
-# Mozc version tag to checkout
-# 9999 (Live ebuild) の場合は master を使うように分岐
+# 最新版を取得するための設定
 if [[ ${PV} == *9999* ]]; then
 	MOZC_TAG="master"
 else
 	MOZC_TAG="${PV}"
 fi
 
-# ★重要: Bazel 8以降の破壊的変更(Bzlmod強制)を回避するため、
+# Bazel 8以降の破壊的変更(Bzlmod強制)を回避するため、
 # 安定してビルドできる 7.x 系を明示的に指定します。
 export USE_BAZEL_VERSION=7.4.1
 
-DESCRIPTION="Mozc with Fcitx5 support and all UT dictionaries (fully built from source)"
-HOMEPAGE="
-	https://github.com/google/mozc
-	https://github.com/fcitx/mozc
-	https://github.com/utuhiro78/merge-ut-dictionaries
-	https://www.post.japanpost.jp/zipcode/download.html
-"
+DESCRIPTION="Mozc with Fcitx5 support and all UT dictionaries (Ken_all + Jigyosyo)"
+HOMEPAGE="https://github.com/google/mozc"
 
-# No SRC_URI - everything is cloned from git
+# ソースはすべてGitから取得するため空
 SRC_URI=""
 
 S="${WORKDIR}/mozc"
@@ -37,7 +31,7 @@ SLOT="0"
 KEYWORDS="~amd64"
 IUSE="emacs gui renderer test"
 
-# network-sandbox を削除し、mirror のみに制限 (bazeliskと辞書DLのため通信必須)
+# 辞書データのダウンロードとBazelによるビルドのためネットワーク必須
 RESTRICT="!test? ( test ) mirror"
 
 BDEPEND="
@@ -48,6 +42,7 @@ BDEPEND="
 	dev-build/ninja
 	dev-vcs/git
 	net-misc/curl
+	net-misc/wget
 	virtual/pkgconfig
 "
 
@@ -56,26 +51,18 @@ RDEPEND="
 	dev-cpp/abseil-cpp:=
 	dev-libs/protobuf:=
 	emacs? ( app-editors/emacs:* )
-	gui? (
-		dev-qt/qtbase:6[gui,widgets]
-	)
+	gui? ( dev-qt/qtbase:6[gui,widgets] )
 	renderer? (
 		dev-qt/qtbase:6[gui,widgets]
 		x11-libs/gtk+:3
 	)
 "
-
 DEPEND="${RDEPEND}"
 
-PATCHES=(
-)
-
 pkg_pretend() {
-	# Bazel requires significant memory
-	# Full source build needs extra resources
 	if [[ ${MERGE_TYPE} != binary ]]; then
 		CHECKREQS_MEMORY="8G"
-		CHECKREQS_DISK_BUILD="15G"
+		CHECKREQS_DISK_BUILD="16G"
 		check-reqs_pkg_pretend
 	fi
 }
@@ -85,202 +72,70 @@ pkg_setup() {
 }
 
 src_unpack() {
-	# Clone Google Mozc from source
-	einfo "Cloning Google Mozc (tag/branch: ${MOZC_TAG})..."
+	# 1. Google Mozc (本体)
+	einfo "Cloning Google Mozc..."
 	git clone --depth 1 --branch "${MOZC_TAG}" \
-		https://github.com/google/mozc.git \
-		"${WORKDIR}/mozc" || die "Failed to clone Google Mozc"
+		https://github.com/google/mozc.git "${S}" || die
 
-	# Initialize and update submodules (abseil, protobuf, etc.)
-	cd "${WORKDIR}/mozc" || die
-	einfo "Initializing Mozc submodules..."
-	git submodule update --init --recursive --depth 1 || die "Failed to update submodules"
+	# サブモジュール (abseil, protobuf等) の初期化
+	cd "${S}" || die
+	git submodule update --init --recursive --depth 1 || die
 
-	# Clone Fcitx5 Mozc patches from source
+	# 2. Fcitx5 パッチ
 	einfo "Cloning Fcitx5 Mozc patches..."
 	git clone --depth 1 --branch fcitx \
-		https://github.com/fcitx/mozc.git \
-		"${WORKDIR}/fcitx5-mozc" || die "Failed to clone Fcitx5 Mozc"
+		https://github.com/fcitx/mozc.git "${WORKDIR}/fcitx5-mozc" || die
 
-	# Clone merge-ut-dictionaries for building dictionaries from source
+	# 3. UT辞書生成スクリプト
 	einfo "Cloning merge-ut-dictionaries..."
 	git clone --depth 1 \
 		https://github.com/utuhiro78/merge-ut-dictionaries.git \
-		"${WORKDIR}/merge-ut-dictionaries" || die "Failed to clone merge-ut-dictionaries"
+		"${WORKDIR}/merge-ut-dictionaries" || die
 }
 
-# Generate place-names dictionary with both ken_all and jigyosyo
-_generate_place_names() {
+# 住所・事業所辞書の生成関数 (カスタム)
+_generate_full_place_names() {
 	local workdir="${1}"
-
-	einfo "Generating place-names dictionary (ken_all + jigyosyo)..."
-
-	# Download Japan Post ZIP code data
-	local ken_all_url="https://www.post.japanpost.jp/zipcode/dl/kogaki/zip/ken_all.zip"
-	local jigyosyo_url="https://www.post.japanpost.jp/zipcode/dl/jigyosyo/zip/jigyosyo.zip"
-
-	mkdir -p "${workdir}/place-names" || die
-	cd "${workdir}/place-names" || die
-
-	# Download and extract ken_all (residential addresses)
-	einfo "  Downloading ken_all.zip (residential addresses)..."
-	curl -L -o ken_all.zip "${ken_all_url}" || die "Failed to download ken_all.zip"
-	unzip -o ken_all.zip || die "Failed to extract ken_all.zip"
-
-	# Download and extract jigyosyo (business addresses)
-	einfo "  Downloading jigyosyo.zip (business addresses)..."
-	curl -L -o jigyosyo.zip "${jigyosyo_url}" || die "Failed to download jigyosyo.zip"
-	unzip -o jigyosyo.zip || die "Failed to extract jigyosyo.zip"
-
-	# Find the actual CSV filenames (may be uppercase or lowercase)
-	local ken_all_csv=$(find . -maxdepth 1 -iname 'ken_all.csv' -print -quit)
-	local jigyosyo_csv=$(find . -maxdepth 1 -iname 'jigyosyo.csv' -print -quit)
-
-	if [[ -z "${ken_all_csv}" ]]; then
-		die "ken_all.csv not found after extraction"
-	fi
-	if [[ -z "${jigyosyo_csv}" ]]; then
-		die "jigyosyo.csv not found after extraction"
-	fi
-
-	einfo "  Found: ${ken_all_csv}, ${jigyosyo_csv}"
-
-	# Use our custom script to generate dictionary with both sources
-	cp "${FILESDIR}/generate_place_names_full.py" . || die
-	"${EPYTHON}" generate_place_names_full.py "${ken_all_csv}" "${jigyosyo_csv}" \
-		|| die "Failed to generate place-names dictionary"
-
-	# Return the generated file path
-	echo "${workdir}/place-names/mozcdic-ut-place-names.txt"
-}
-
-# Generate UT dictionaries from source using merge-ut-dictionaries
-_generate_ut_dictionaries() {
-	local merge_dir="${WORKDIR}/merge-ut-dictionaries"
-	local dict_output="${WORKDIR}/ut-dictionaries"
-
-	mkdir -p "${dict_output}" || die
-
-	# --- venv Setup to avoid "externally-managed-environment" error ---
-	einfo "Setting up temporary Python venv for dictionary generation..."
-	local venv_dir="${T}/mozc_dict_venv"
-	"${EPYTHON}" -m venv "${venv_dir}" || die "Failed to create venv"
-	source "${venv_dir}/bin/activate" || die "Failed to activate venv"
+	local dict_output="${2}"
 	
-	# Install required packages (jaconv is needed for UT dictionaries)
-	einfo "Installing jaconv into venv..."
-	pip install --upgrade pip
-	pip install jaconv || die "Failed to install jaconv"
-	# ------------------------------------------------------------------
+	einfo "Generating FULL place-names dictionary (Residential + Business)..."
+	mkdir -p "${workdir}/place-names-work"
+	cd "${workdir}/place-names-work" || die
 
-	einfo "Building UT dictionaries from source (inside venv)..."
+	# 日本郵便データのダウンロード
+	local ken_url="https://www.post.japanpost.jp/zipcode/dl/kogaki/zip/ken_all.zip"
+	local jigyo_url="https://www.post.japanpost.jp/zipcode/dl/jigyosyo/zip/jigyosyo.zip"
 
-	# Generate alt-cannadic
-	einfo "  Generating alt-cannadic..."
-	cd "${merge_dir}/src/alt-cannadic" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "alt-cannadic generation failed"
-		[[ -f mozcdic-ut-alt-cannadic.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-alt-cannadic.txt.bz2 && \
-			cp mozcdic-ut-alt-cannadic.txt "${dict_output}/"
-	fi
+	wget -N "${ken_url}" || die "Failed to download ken_all"
+	wget -N "${jigyo_url}" || die "Failed to download jigyosyo"
 
-	# Generate edict2
-	einfo "  Generating edict2..."
-	cd "${merge_dir}/src/edict2" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "edict2 generation failed"
-		[[ -f mozcdic-ut-edict2.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-edict2.txt.bz2 && \
-			cp mozcdic-ut-edict2.txt "${dict_output}/"
-	fi
+	unzip -o ken_all.zip || die
+	unzip -o jigyosyo.zip || die
 
-	# Generate jawiki (this may take a while)
-	einfo "  Generating jawiki..."
-	cd "${merge_dir}/src/jawiki" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "jawiki generation failed"
-		[[ -f mozcdic-ut-jawiki.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-jawiki.txt.bz2 && \
-			cp mozcdic-ut-jawiki.txt "${dict_output}/"
-	fi
+	local ken_csv=$(find . -iname 'ken_all.csv' | head -n1)
+	local jigyo_csv=$(find . -iname 'jigyosyo.csv' | head -n1)
 
-	# Generate neologd
-	einfo "  Generating neologd..."
-	cd "${merge_dir}/src/neologd" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "neologd generation failed"
-		[[ -f mozcdic-ut-neologd.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-neologd.txt.bz2 && \
-			cp mozcdic-ut-neologd.txt "${dict_output}/"
-	fi
-
-	# Generate personal-names (part of common)
-	einfo "  Generating personal-names..."
-	cd "${merge_dir}/src/common" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "personal-names generation failed"
-	fi
-	# personal-names may be in common directory
-	find "${merge_dir}/src" -name "mozcdic-ut-personal-names.txt*" -exec sh -c \
-		'f="{}"; [[ "$f" == *.bz2 ]] && bunzip2 -kf "$f"; cp "${f%.bz2}" "'"${dict_output}"'/" 2>/dev/null' \;
-
-	# Generate place-names with jigyosyo support (our custom version)
-	einfo "  Generating place-names (with jigyosyo)..."
-	local place_names_file
-	place_names_file=$(_generate_place_names "${WORKDIR}")
-	[[ -f "${place_names_file}" ]] && cp "${place_names_file}" "${dict_output}/"
-
-	# Generate skk-jisyo
-	einfo "  Generating skk-jisyo..."
-	cd "${merge_dir}/src/skk-jisyo" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "skk-jisyo generation failed"
-		[[ -f mozcdic-ut-skk-jisyo.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-skk-jisyo.txt.bz2 && \
-			cp mozcdic-ut-skk-jisyo.txt "${dict_output}/"
-	fi
-
-	# Generate sudachidict
-	einfo "  Generating sudachidict..."
-	cd "${merge_dir}/src/sudachidict" || die
-	if [[ -f make.sh ]]; then
-		bash make.sh || die "sudachidict generation failed"
-		[[ -f mozcdic-ut-sudachidict.txt.bz2 ]] && \
-			bunzip2 -kf mozcdic-ut-sudachidict.txt.bz2 && \
-			cp mozcdic-ut-sudachidict.txt "${dict_output}/"
-	fi
-
-	# --- Clean up venv ---
-	deactivate
-	# ---------------------
-
-	echo "${dict_output}"
+	# カスタムスクリプトの実行
+	cp "${FILESDIR}/generate_place_names_full.py" . || die
+	"${EPYTHON}" generate_place_names_full.py \
+		"${ken_csv}" "${jigyo_csv}" \
+		-o "${dict_output}/mozcdic-ut-place-names.txt" || die
 }
 
 src_prepare() {
 	default
 
-	# Apply fcitx5 patches from fcitx/mozc repository
-	einfo "Applying Fcitx5 patches..."
+	# Fcitx5パッチの適用
 	if [[ -d "${WORKDIR}/fcitx5-mozc/scripts/patches" ]]; then
-		for patch in "${WORKDIR}/fcitx5-mozc/scripts/patches"/*.patch; do
-			if [[ -f "${patch}" ]]; then
-				einfo "  Applying: $(basename ${patch})"
-				eapply "${patch}" || ewarn "Patch failed: $(basename ${patch})"
-			fi
+		for p in "${WORKDIR}/fcitx5-mozc/scripts/patches"/*.patch; do
+			eapply "${p}"
 		done
 	fi
+	
+	# Fcitx5ソースのコピー
+	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# Copy fcitx5 module source
-	einfo "Copying Fcitx5 module source..."
-	if [[ -d "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" ]]; then
-		cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
-	fi
-
-	# --- Fix: Add fcitx5 repository definition to WORKSPACE ---
-	einfo "Updating WORKSPACE with fcitx5 repository definition..."
-	# Bazel 7.x 以前であれば WORKSPACE ファイルへの追記が有効です
+	# WORKSPACEファイルへのFcitx5定義追加 (重要)
 	cat >> "${S}/src/WORKSPACE" <<EOF
 new_local_repository(
     name = "fcitx5",
@@ -294,40 +149,71 @@ cc_library(
 """,
 )
 EOF
-	# ----------------------------------------------------------
 
-	# Generate UT dictionaries from source
-	local dict_dir
-	dict_dir=$(_generate_ut_dictionaries)
+	# --- 辞書生成プロセス (venv内で実行) ---
+	local dict_out="${WORKDIR}/dictionaries"
+	mkdir -p "${dict_out}"
 
-	# Merge UT dictionaries into Mozc
-	einfo "Merging UT dictionaries into Mozc..."
-	local dict_file="${S}/src/data/dictionary_oss/dictionary00.txt"
-	local count=0
+	# venv作成
+	python -m venv "${T}/venv" || die
+	source "${T}/venv/bin/activate" || die
+	
+	# 依存パッケージインストール (jaconv必須)
+	pip install --upgrade pip
+	pip install jaconv || die
 
-	for dict in alt-cannadic edict2 jawiki neologd personal-names place-names skk-jisyo sudachidict; do
-		local dict_path="${dict_dir}/mozcdic-ut-${dict}.txt"
-		if [[ -f "${dict_path}" ]]; then
-			cat "${dict_path}" >> "${dict_file}" || die
-			einfo "  Added: ${dict}"
-			(( count++ ))
-		else
-			ewarn "  Missing: ${dict}"
+	# 各UT辞書の生成
+	local merge_src="${WORKDIR}/merge-ut-dictionaries/src"
+	local dicts=(alt-cannadic edict2 jawiki neologd skk-jisyo sudachidict)
+
+	for d in "${dicts[@]}"; do
+		einfo "Generating ${d}..."
+		cd "${merge_src}/${d}" || die
+		if [[ -f make.sh ]]; then
+			# make.sh 内の sudo を無効化しつつ実行
+			sed -i 's/sudo //g' make.sh
+			bash make.sh || die "Failed to generate ${d}"
+			
+			# 生成物のコピー (.txt または .bz2)
+			find . -name "mozcdic-ut-${d}.txt*" -exec cp {} "${dict_out}/" \;
 		fi
 	done
+	
+	# personal-names (common内)
+	einfo "Generating personal-names..."
+	cd "${merge_src}/common" || die
+	if [[ -f make.sh ]]; then
+		bash make.sh
+		find . -name "mozcdic-ut-personal-names.txt*" -exec cp {} "${dict_out}/" \;
+	fi
 
-	einfo "UT dictionary merge complete. Added ${count} dictionaries."
+	# 住所+事業所辞書 (カスタム関数呼び出し)
+	_generate_full_place_names "${WORKDIR}" "${dict_out}"
+
+	deactivate
+
+	# --- 辞書のマージ ---
+	einfo "Merging all dictionaries..."
+	cd "${dict_out}" || die
+	# bzip2圧縮されているものを展開
+	find . -name "*.bz2" -exec bunzip2 {} \;
+
+	local target_dict="${S}/src/data/dictionary_oss/dictionary00.txt"
+	
+	for f in mozcdic-ut-*.txt; do
+		if [[ -f "${f}" ]]; then
+			einfo "  Appending ${f}..."
+			cat "${f}" >> "${target_dict}" || die
+		fi
+	done
 }
 
-src_configure() {
-	:
-}
+src_configure() { :; }
 
 src_compile() {
 	cd "${S}/src" || die
 
-	# Bazel options
-	local bazel_args=(
+	local args=(
 		"--config=linux"
 		"--compilation_mode=opt"
 		"--copt=-Wno-error"
@@ -335,127 +221,44 @@ src_compile() {
 		"--jobs=$(nproc)"
 	)
 
-	# Build mozc_server
-	einfo "Building mozc_server..."
-	bazelisk build "${bazel_args[@]}" \
-		server:mozc_server || die "mozc_server build failed"
-
-	# Build fcitx5 module
-	einfo "Building fcitx5 module..."
-	bazelisk build "${bazel_args[@]}" \
-		unix/fcitx5:fcitx5-mozc.so || die "fcitx5-mozc.so build failed"
-
-	# Build optional components
-	if use emacs; then
-		einfo "Building emacs helper..."
-		bazelisk build "${bazel_args[@]}" \
-			unix/emacs:mozc_emacs_helper || die
-	fi
-
-	if use gui; then
-		einfo "Building mozc_tool..."
-		bazelisk build "${bazel_args[@]}" \
-			gui/tool:mozc_tool || die
-	fi
-
-	if use renderer; then
-		einfo "Building mozc_renderer..."
-		bazelisk build "${bazel_args[@]}" \
-			renderer:mozc_renderer || die
-	fi
+	# サーバービルド
+	bazelisk build "${args[@]}" server:mozc_server || die
+	
+	# Fcitx5モジュールビルド (.soターゲット指定)
+	bazelisk build "${args[@]}" unix/fcitx5:fcitx5-mozc.so || die
+	
+	# ツール類
+	use gui && bazelisk build "${args[@]}" gui/tool:mozc_tool
+	use renderer && bazelisk build "${args[@]}" renderer:mozc_renderer
 }
 
 src_install() {
 	cd "${S}/src" || die
+	local out="bazel-out/k8-opt/bin"
 
-	local bazel_out="${S}/src/bazel-out/k8-opt/bin"
-
-	# Install mozc_server
 	exeinto /usr/libexec/mozc
-	doexe "${bazel_out}/server/mozc_server"
-
-	# Install fcitx5 module
+	doexe "${out}/server/mozc_server"
+	
 	insinto /usr/$(get_libdir)/fcitx5
-	doins "${bazel_out}/unix/fcitx5/fcitx5-mozc.so"
-
-	# Install fcitx5 addon config
+	doins "${out}/unix/fcitx5/fcitx5-mozc.so"
+	
 	insinto /usr/share/fcitx5/addon
 	doins "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5/mozc-addon.conf"
-
 	insinto /usr/share/fcitx5/inputmethod
 	doins "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5/mozc.conf"
-
-	# Install icons
-	local icon_sizes="16 22 24 32 48 64 128 256"
-	for size in ${icon_sizes}; do
-		if [[ -f "${S}/data/images/product_icon_${size}.png" ]]; then
-			newicon -s ${size} \
-				"${S}/data/images/product_icon_${size}.png" \
-				fcitx5-mozc.png
-		fi
+	
+	# アイコン
+	for s in 32 48 128; do
+		newicon -s ${s} "data/images/product_icon_${s}.png" fcitx5-mozc.png
 	done
 
-	# Install emacs support
-	if use emacs; then
-		exeinto /usr/libexec/mozc
-		doexe "${bazel_out}/unix/emacs/mozc_emacs_helper"
-
-		insinto /usr/share/emacs/site-lisp/mozc
-		doins "${S}/src/unix/emacs/mozc.el"
-	fi
-
-	# Install GUI tool
 	if use gui; then
-		exeinto /usr/libexec/mozc
-		doexe "${bazel_out}/gui/tool/mozc_tool"
-
-		make_desktop_entry \
-			"/usr/libexec/mozc/mozc_tool --mode=config_dialog" \
-			"Mozc Setup" \
-			fcitx5-mozc \
-			"Settings;IBus;Qt"
-
-		make_desktop_entry \
-			"/usr/libexec/mozc/mozc_tool --mode=dictionary_tool" \
-			"Mozc Dictionary Tool" \
-			fcitx5-mozc \
-			"Office;Dictionary;Qt"
+		doexe "${out}/gui/tool/mozc_tool"
+		make_desktop_entry "/usr/libexec/mozc/mozc_tool --mode=config_dialog" "Mozc Setup" fcitx5-mozc "Settings;"
+		make_desktop_entry "/usr/libexec/mozc/mozc_tool --mode=dictionary_tool" "Mozc Dictionary" fcitx5-mozc "Settings;"
 	fi
-
-	# Install renderer
+	
 	if use renderer; then
-		exeinto /usr/libexec/mozc
-		doexe "${bazel_out}/renderer/mozc_renderer"
-	fi
-}
-
-pkg_postinst() {
-	xdg_pkg_postinst
-
-	elog "Mozc with fcitx5 support and UT dictionaries has been installed."
-	elog ""
-	elog "This package is FULLY built from source:"
-	elog "  - Google Mozc: cloned from git (tag/branch: ${MOZC_TAG})"
-	elog "  - Fcitx5 patches: cloned from fcitx/mozc"
-	elog "  - All UT dictionaries: generated from source"
-	elog ""
-	elog "Included UT dictionaries:"
-	elog "  - alt-cannadic: Alternative Cannadic dictionary"
-	elog "  - edict2: Japanese-English dictionary"
-	elog "  - jawiki: Japanese Wikipedia dictionary"
-	elog "  - neologd: Neologism dictionary"
-	elog "  - personal-names: Personal name dictionary"
-	elog "  - place-names: Place name dictionary (ken_all + jigyosyo)"
-	elog "  - skk-jisyo: SKK Japanese dictionary"
-	elog "  - sudachidict: Sudachi morphological dictionary"
-	elog ""
-	elog "Place-names dictionary includes BOTH:"
-	elog "  - Residential addresses (ken_all.zip)"
-	elog "  - Business/office addresses (jigyosyo.zip)"
-	elog ""
-	elog "To use fcitx5-mozc, add 'mozc' to your fcitx5 input methods."
-	elog ""
-	if use gui; then
-		elog "Run 'mozc_tool --mode=config_dialog' to configure Mozc."
+		doexe "${out}/renderer/mozc_renderer"
 	fi
 }
