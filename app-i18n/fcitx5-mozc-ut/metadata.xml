@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>maintainer@example.com</email>
+		<name>Overlay Maintainer</name>
+	</maintainer>
+	<longdescription lang="en">
+		Mozc is a Japanese Input Method Editor (IME) designed for multi-platform.
+		This package includes fcitx5 support and all UT dictionaries from utuhiro78:
+		- mozcdic-ut-alt-cannadic: Alternative Cannadic dictionary
+		- mozcdic-ut-edict2: Japanese-English dictionary from EDICT2
+		- mozcdic-ut-jawiki: Japanese Wikipedia dictionary
+		- mozcdic-ut-neologd: Neologism dictionary from mecab-ipadic-NEologd
+		- mozcdic-ut-personal-names: Personal name dictionary
+		- mozcdic-ut-place-names: Place name dictionary from Japan Post ZIP code data
+		- mozcdic-ut-skk-jisyo: SKK Japanese dictionary
+		- mozcdic-ut-sudachidict: Sudachi morphological dictionary
+	</longdescription>
+	<longdescription lang="ja">
+		Mozcはマルチプラットフォーム向けに設計された日本語入力エディタ（IME）です。
+		このパッケージにはfcitx5サポートとutuhiro78による全UTディクショナリが含まれています：
+		- mozcdic-ut-alt-cannadic: Alternative Cannadicディクショナリ
+		- mozcdic-ut-edict2: EDICT2からの日英辞書
+		- mozcdic-ut-jawiki: 日本語Wikipediaディクショナリ
+		- mozcdic-ut-neologd: mecab-ipadic-NEologdからの新語辞書
+		- mozcdic-ut-personal-names: 人名辞書
+		- mozcdic-ut-place-names: 郵便番号データからの地名辞書
+		- mozcdic-ut-skk-jisyo: SKK日本語辞書
+		- mozcdic-ut-sudachidict: Sudachi形態素辞書
+	</longdescription>
+	<upstream>
+		<remote-id type="github">google/mozc</remote-id>
+		<remote-id type="github">fcitx/mozc</remote-id>
+		<remote-id type="github">utuhiro78/merge-ut-dictionaries</remote-id>
+	</upstream>
+	<use>
+		<flag name="emacs">Enable emacs support</flag>
+		<flag name="gui">Build mozc_tool GUI configuration tool</flag>
+		<flag name="renderer">Build mozc_renderer for candidate window</flag>
+	</use>
+</pkgmetadata>
