@@ -44,6 +44,7 @@ BDEPEND="
 	dev-build/ninja
 	dev-vcs/git
 	net-misc/curl
+	net-misc/wget
 	virtual/pkgconfig
 "
 
@@ -170,7 +171,8 @@ _generate_ut_dictionaries() {
 	einfo "  Generating alt-cannadic..."
 	cd "${merge_dir}/src/alt-cannadic" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "alt-cannadic generation failed, skipping"
+		# ewarnではなくdieに変更して、エラー発生時に即停止させる
+		bash make.sh || die "alt-cannadic generation failed"
 		[[ -f mozcdic-ut-alt-cannadic.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-alt-cannadic.txt.bz2 && \
 			cp mozcdic-ut-alt-cannadic.txt "${dict_output}/"
@@ -180,7 +182,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating edict2..."
 	cd "${merge_dir}/src/edict2" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "edict2 generation failed, skipping"
+		bash make.sh || die "edict2 generation failed"
 		[[ -f mozcdic-ut-edict2.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-edict2.txt.bz2 && \
 			cp mozcdic-ut-edict2.txt "${dict_output}/"
@@ -190,7 +192,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating jawiki..."
 	cd "${merge_dir}/src/jawiki" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "jawiki generation failed, skipping"
+		bash make.sh || die "jawiki generation failed"
 		[[ -f mozcdic-ut-jawiki.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-jawiki.txt.bz2 && \
 			cp mozcdic-ut-jawiki.txt "${dict_output}/"
@@ -200,7 +202,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating neologd..."
 	cd "${merge_dir}/src/neologd" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "neologd generation failed, skipping"
+		bash make.sh || die "neologd generation failed"
 		[[ -f mozcdic-ut-neologd.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-neologd.txt.bz2 && \
 			cp mozcdic-ut-neologd.txt "${dict_output}/"
@@ -210,7 +212,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating personal-names..."
 	cd "${merge_dir}/src/common" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "personal-names generation failed, skipping"
+		bash make.sh || die "personal-names generation failed"
 	fi
 	# personal-names may be in common directory
 	find "${merge_dir}/src" -name "mozcdic-ut-personal-names.txt*" -exec sh -c \
@@ -227,7 +229,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating skk-jisyo..."
 	cd "${merge_dir}/src/skk-jisyo" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "skk-jisyo generation failed, skipping"
+		bash make.sh || die "skk-jisyo generation failed"
 		[[ -f mozcdic-ut-skk-jisyo.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-skk-jisyo.txt.bz2 && \
 			cp mozcdic-ut-skk-jisyo.txt "${dict_output}/"
@@ -237,7 +239,7 @@ _generate_ut_dictionaries() {
 	einfo "  Generating sudachidict..."
 	cd "${merge_dir}/src/sudachidict" || die
 	if [[ -f make.sh ]]; then
-		bash make.sh || ewarn "sudachidict generation failed, skipping"
+		bash make.sh || die "sudachidict generation failed"
 		[[ -f mozcdic-ut-sudachidict.txt.bz2 ]] && \
 			bunzip2 -kf mozcdic-ut-sudachidict.txt.bz2 && \
 			cp mozcdic-ut-sudachidict.txt "${dict_output}/"
@@ -304,7 +306,7 @@ EOF
 			einfo "  Added: ${dict}"
 			(( count++ ))
 		else
-			ewarn "  Missing: ${dict}"
+			die "Missing dictionary: ${dict} (Generation failed)"
 		fi
 	done
 
@@ -318,6 +320,12 @@ src_configure() {
 src_compile() {
 	cd "${S}/src" || die
 
+	# --- FORCE BAZEL 7 ---
+	# Bazel 8 disabled WORKSPACE file support by default, which breaks our build.
+	# We force Bazelisk to use a stable 7.x version.
+	export USE_BAZEL_VERSION=7.4.1
+	# ---------------------
+
 	# Bazel options
 	local bazel_args=(
 		"--config=linux"
@@ -328,7 +336,7 @@ src_compile() {
 	)
 
 	# Build mozc_server
-	einfo "Building mozc_server..."
+	einfo "Building mozc_server (Bazel ${USE_BAZEL_VERSION})..."
 	bazelisk build "${bazel_args[@]}" \
 		server:mozc_server || die "mozc_server build failed"
 
