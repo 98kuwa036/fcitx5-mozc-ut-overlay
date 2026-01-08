@@ -27,7 +27,7 @@ SLOT="0"
 KEYWORDS="~amd64"
 IUSE="emacs gui renderer test"
 
-# ネットワークアクセス制限を解除 (ビルド中に外部データを取得するため)
+# ネットワークアクセス制限を解除
 RESTRICT="!test? ( test ) mirror"
 
 BDEPEND="
@@ -58,7 +58,6 @@ DEPEND="${RDEPEND}"
 pkg_pretend() {
 	if [[ ${MERGE_TYPE} != binary ]]; then
 		CHECKREQS_MEMORY="8G"
-		# ディスク容量不足を避けるためチェックを12Gに調整
 		CHECKREQS_DISK_BUILD="12G"
 		check-reqs_pkg_pretend
 	fi
@@ -69,13 +68,11 @@ pkg_setup() {
 }
 
 src_unpack() {
-	# Mozc本体の取得
 	einfo "Cloning Google Mozc..."
 	git clone --depth 1 --branch "${MOZC_TAG}" https://github.com/google/mozc.git "${S}" || die
 	cd "${S}" || die
 	git submodule update --init --recursive --depth 1 || die
 
-	# Fcitx5パッチとUT辞書スクリプトの取得
 	einfo "Cloning external resources..."
 	git clone --depth 1 --branch fcitx https://github.com/fcitx/mozc.git "${WORKDIR}/fcitx5-mozc" || die
 	git clone --depth 1 https://github.com/utuhiro78/merge-ut-dictionaries.git "${WORKDIR}/merge-ut-dictionaries" || die
@@ -89,7 +86,6 @@ _generate_full_place_names() {
 	mkdir -p "${workdir}/place-names-work"
 	cd "${workdir}/place-names-work" || die
 
-	# 住所と事業所データの取得
 	wget -N "https://www.post.japanpost.jp/zipcode/dl/kogaki/zip/ken_all.zip" || die
 	wget -N "https://www.post.japanpost.jp/zipcode/dl/jigyosyo/zip/jigyosyo.zip" || die
 
@@ -99,7 +95,6 @@ _generate_full_place_names() {
 	local ken_csv=$(find . -iname 'ken_all.csv' | head -n1)
 	local jigyo_csv=$(find . -iname 'jigyosyo.csv' | head -n1)
 
-	# カスタムスクリプトでマージ
 	cp "${FILESDIR}/generate_place_names_full.py" . || die
 	"${EPYTHON}" generate_place_names_full.py "${ken_csv}" "${jigyo_csv}" -o "${dict_output}/mozcdic-ut-place-names.txt" || die
 }
@@ -115,12 +110,15 @@ src_prepare() {
 	fi
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# ★ 重要: BazelのVisibilityエラーの修正 ★
-	# //visibility:public と他のターゲットの混在を解消する
-	einfo "Fixing Bazel visibility issues..."
-	sed -i 's/"\/\/visibility:public",/"\/\/visibility:public"/g' "${S}/src/client/BUILD.bazel" || die
-	sed -i '/"\/\/unix\/fcitx5:__pkg__"/d' "${S}/src/client/BUILD.bazel" || die
-	# ----------------------------------------
+	# ★ 重要: Bazel Visibility 文法エラーの強制的修正 ★
+	# client/BUILD.bazel 内の不完全なリスト定義を完全に public に置き換える
+	einfo "Forcing fix for Bazel visibility syntax errors..."
+	# "Implicit string concatenation" と "expected ]" を防ぐため、
+	# visibility 指定行を検索し、中身を単純化する
+	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/client/BUILD.bazel" || die
+	# 念の為、他の主要なBUILDファイルも同様の処理を行う
+	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/session/BUILD.bazel" || die
+	# --------------------------------------------------
 
 	# WORKSPACE への Fcitx5 定義追加
 	einfo "Updating WORKSPACE..."
