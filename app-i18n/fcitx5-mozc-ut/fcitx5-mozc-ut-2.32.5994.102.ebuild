@@ -13,7 +13,7 @@ else
 	MOZC_TAG="${PV}"
 fi
 
-# Bazel 8の非互換性を避け、提示されたビルドオプションが確実に通る 7.4.1 を使用
+# Bazel 8 の非互換性を避け、WORKSPACEをサポートする 7.4.1 を使用
 export USE_BAZEL_VERSION=7.4.1
 
 DESCRIPTION="Mozc with Fcitx5 support and UT dictionaries (Ken_all + Jigyosyo)"
@@ -107,10 +107,13 @@ src_prepare() {
 	fi
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# ★ Visibility エラーの強行修正 ★
-	# 文法エラーを根絶するため、不完全な visibility リストを public に一括置換
-	einfo "Patching visibility syntax errors..."
-	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/client/BUILD.bazel" || die
+	# ★ visibility 設定の構文エラー修正（安全な置換）★
+	# 前回の失敗（ターゲット自体の削除）を避け、不適切なリスト構成のみを修正する
+	einfo "Fixing visibility syntax in BUILD files..."
+	# カンマ欠落による連結エラーを防ぐため、visibility リストを public 1つに固定する
+	# 特定のターゲット行（//unix/fcitx5...）を削除し、public の末尾にカンマがあるか確認する
+	sed -i '/"\/\/unix\/fcitx5:__pkg__"/d' "${S}/src/client/BUILD.bazel" || die
+	sed -i 's/"\/\/visibility:public",/"\/\/visibility:public"/g' "${S}/src/client/BUILD.bazel" || die
 
 	# WORKSPACE への定義追加
 	einfo "Updating WORKSPACE..."
@@ -165,7 +168,7 @@ src_configure() { :; }
 
 src_compile() {
 	cd "${S}/src" || die
-	# 提示されたオプションを反映
+	# 抜粋された情報を反映したビルド引数
 	local args=(
 		"-c" "opt"
 		"--copt=-fPIC"
