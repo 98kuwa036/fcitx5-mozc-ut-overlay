@@ -7,14 +7,13 @@ PYTHON_COMPAT=( python3_{11..13} )
 
 inherit check-reqs cmake desktop python-any-r1 xdg
 
-# 最新版ビルドのためのタグ設定
 if [[ ${PV} == *9999* ]]; then
 	MOZC_TAG="master"
 else
 	MOZC_TAG="${PV}"
 fi
 
-# Bazel 8 の Bzlmod 問題を回避するため 7.x に固定
+# Bazel 8の非互換性を避け、提示されたビルドオプションが確実に通る 7.4.1 を使用
 export USE_BAZEL_VERSION=7.4.1
 
 DESCRIPTION="Mozc with Fcitx5 support and UT dictionaries (Ken_all + Jigyosyo)"
@@ -27,7 +26,6 @@ SLOT="0"
 KEYWORDS="~amd64"
 IUSE="emacs gui renderer test"
 
-# ネットワークアクセス制限を解除
 RESTRICT="!test? ( test ) mirror"
 
 BDEPEND="
@@ -81,7 +79,6 @@ src_unpack() {
 _generate_full_place_names() {
 	local workdir="${1}"
 	local dict_output="${2}"
-	
 	einfo "Generating full place-names dictionary..."
 	mkdir -p "${workdir}/place-names-work"
 	cd "${workdir}/place-names-work" || die
@@ -110,17 +107,12 @@ src_prepare() {
 	fi
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# ★ 重要: Bazel Visibility 文法エラーの強制的修正 ★
-	# client/BUILD.bazel 内の不完全なリスト定義を完全に public に置き換える
-	einfo "Forcing fix for Bazel visibility syntax errors..."
-	# "Implicit string concatenation" と "expected ]" を防ぐため、
-	# visibility 指定行を検索し、中身を単純化する
+	# ★ Visibility エラーの強行修正 ★
+	# 文法エラーを根絶するため、不完全な visibility リストを public に一括置換
+	einfo "Patching visibility syntax errors..."
 	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/client/BUILD.bazel" || die
-	# 念の為、他の主要なBUILDファイルも同様の処理を行う
-	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/session/BUILD.bazel" || die
-	# --------------------------------------------------
 
-	# WORKSPACE への Fcitx5 定義追加
+	# WORKSPACE への定義追加
 	einfo "Updating WORKSPACE..."
 	cat >> "${S}/src/WORKSPACE" <<EOF
 new_local_repository(
@@ -136,7 +128,7 @@ cc_library(
 )
 EOF
 
-	# 辞書生成 (venv使用)
+	# 辞書生成 (venv内で jaconv を使用)
 	local dict_out="${WORKDIR}/dictionaries"
 	mkdir -p "${dict_out}"
 
@@ -173,11 +165,11 @@ src_configure() { :; }
 
 src_compile() {
 	cd "${S}/src" || die
+	# 提示されたオプションを反映
 	local args=(
-		"--config=linux"
-		"--compilation_mode=opt"
-		"--copt=-Wno-error"
-		"--host_copt=-Wno-error"
+		"-c" "opt"
+		"--copt=-fPIC"
+		"--config" "oss_linux"
 		"--jobs=$(nproc)"
 	)
 
