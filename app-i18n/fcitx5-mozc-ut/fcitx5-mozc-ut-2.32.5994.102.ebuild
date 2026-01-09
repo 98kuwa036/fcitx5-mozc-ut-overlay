@@ -107,11 +107,45 @@ src_prepare() {
 	fi
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# ★ Visibility 文法エラーの強行修正 ★
-	einfo "Patching visibility syntax errors..."
-	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/client/BUILD.bazel" || die
+	# ★ Visibility 修正 (Pythonスクリプトによる安全な書き換え) ★
+	einfo "Fixing Bazel visibility using Python..."
+	cat > "${T}/fix_visibility.py" <<EOF
+import sys
+import re
 
-	# ★★★ 以下のブロックがご提示のコードから抜けていました。これを戻さないとビルドできません ★★★
+def fix_file(path):
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    
+    new_lines = ['package(default_visibility = ["//visibility:public"])\n']
+    skip = False
+    
+    for line in lines:
+        s = line.strip()
+        # visibility = [...] ブロックの検出とスキップ
+        if re.search(r'^\s*visibility\s*=\s*\[', line):
+            if s.endswith('],') or s.endswith(']'):
+                continue # 1行で完結している場合
+            skip = True
+            continue
+        
+        if skip:
+            if s.endswith('],') or s.endswith(']'):
+                skip = False
+            continue
+            
+        new_lines.append(line)
+
+    with open(path, 'w') as f:
+        f.writelines(new_lines)
+
+if __name__ == '__main__':
+    for p in sys.argv[1:]:
+        fix_file(p)
+EOF
+	# エラーの原因となっていた client と session の BUILD ファイルを修正
+	"${EPYTHON}" "${T}/fix_visibility.py" "${S}/src/client/BUILD.bazel" "${S}/src/session/BUILD.bazel" || die
+
 	# WORKSPACE への Fcitx5 定義追加
 	einfo "Updating WORKSPACE..."
 	cat >> "${S}/src/WORKSPACE" <<EOF
@@ -127,9 +161,8 @@ cc_library(
 """,
 )
 EOF
-	# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-	# 辞書生成 (venv内で jaconv を使用)
+	# 辞書生成
 	local dict_out="${WORKDIR}/dictionaries"
 	mkdir -p "${dict_out}"
 
@@ -166,7 +199,6 @@ src_configure() { :; }
 
 src_compile() {
 	cd "${S}/src" || die
-	# 抜粋情報を反映: --config oss_linux を使用
 	local args=(
 		"-c" "opt"
 		"--copt=-fPIC"
