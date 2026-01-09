@@ -108,9 +108,26 @@ src_prepare() {
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
 	# ★ Visibility 文法エラーの強行修正 ★
-	# リスト要素間のカンマ不足や不正な結合を排除するため、visibilityブロックを置換
 	einfo "Patching visibility syntax errors..."
 	sed -i '/visibility = \[/,/\]/c\    visibility = ["//visibility:public"],' "${S}/src/client/BUILD.bazel" || die
+
+	# ★★★ 以下のブロックがご提示のコードから抜けていました。これを戻さないとビルドできません ★★★
+	# WORKSPACE への Fcitx5 定義追加
+	einfo "Updating WORKSPACE..."
+	cat >> "${S}/src/WORKSPACE" <<EOF
+new_local_repository(
+    name = "fcitx5",
+    path = "/usr/include/fcitx5",
+    build_file_content = """
+cc_library(
+    name = "fcitx5",
+    hdrs = glob(["**/*.h"]),
+    visibility = ["//visibility:public"],
+)
+""",
+)
+EOF
+	# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 	# 辞書生成 (venv内で jaconv を使用)
 	local dict_out="${WORKDIR}/dictionaries"
