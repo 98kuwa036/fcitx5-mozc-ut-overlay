@@ -72,36 +72,44 @@ src_prepare() {
 
 	# --- UT辞書ツールの準備 ---
 	cd "${WORKDIR}/merge-ut-dictionaries" || die
-	# 依存モジュールの準備
 	go mod vendor || die
 
-	# --- 郵便データの処理 (Shift-JIS -> UTF-8 & Jigyosyo統合) ---
+	# --- 郵便データの処理 ---
 	cd "${WORKDIR}" || die
 	
-	ebegin "Converting Japan Post CSVs to UTF-8"
-	nkf -w --overwrite KEN_ALL.CSV || die
-	nkf -w --overwrite JIGYOSYO.CSV || die
+	# nkfオプション解説:
+	# -w: UTF-8に出力
+	# --overwrite: 上書き
+	# -Lu: 改行コードをLF（Unix形式）に変換（WindowsのCRLFによる誤動作防止）
+	# ※ ここではあえて -X (半角->全角) は付けません。
+	#    merge-ut-dictionaries は KEN_ALL の生のフォーマット(半角)を期待している可能性があるため、
+	#    データの「意味」を変えずに「エンコーディング」だけを安全に変換します。
+	
+	ebegin "Converting Japan Post CSVs to UTF-8 (Safe Mode)"
+	nkf -w -Lu --overwrite KEN_ALL.CSV || die
+	nkf -w -Lu --overwrite JIGYOSYO.CSV || die
 	eend $?
 
 	ebegin "Merging Jigyosyo data into KEN_ALL format"
-	# JIGYOSYO.CSVはKEN_ALL.CSVとカラム数が異なるため、単純結合できません。
-	# merge-ut-dictionariesが期待するフォーマット(KEN_ALL互換)にawkで変換します。
-	# KEN_ALL format: Code(1), OldZip(2), Zip(3), PrefKana(4), CityKana(5), TownKana(6), Pref(7), City(8), Town(9)...
-	# JIGYOSYO format: Code(1), Kana(2), Kanji(3), Pref(4), City(5), Town(6), Banchi(7), Zip(8)...
-	# ※ここでは簡易的に事業所名(Kanji)を町域部分にマッピングして辞書ツールに認識させます。
+	# awkスクリプト: jaconvを使わずにテキスト整形を行う
+	# 事業所データ(JIGYOSYO.CSV)をKEN_ALL形式にマッピングします。
+	# カタカナ変換などは行わず、そのまま結合して辞書ツールに渡します。
 	
 	awk -F',' 'BEGIN {OFS=","} {
-		# Jigyosyoのカラムから必要な情報を抽出
+		# JIGYOSYO.CSVのフォーマット
+		# 1:大口事業所個別番号, 2:事業所名(カナ), 3:事業所名(漢字), 
+		# 4:都道府県(漢字), 5:市区町村(漢字), 6:町域(漢字), 7:番地(漢字), 8:郵便番号
+		
 		zip = $8
-		pref_kana = "" # 事業所データには都道府県カナがない場合があるため空で代用または補完
-		city_kana = ""
-		town_kana = $2 # 事業所名カナ
+		town_kana = $2 # カナ部分
 		pref = $4
 		city = $5
-		town = $3 # 事業所名漢字
+		# 町域部分に「事業所名 + 番地」を入れることで変換候補に出やすくする
+		town = $3 $6 $7 
 		
-		# KEN_ALL形式に合わせて出力 (引用符 " を考慮)
-		print $1, "000", zip, "\"\"", "\"\"", town_kana, pref, city, town, $9, $10, $11, $12, $13, $14
+		# KEN_ALL.CSV互換フォーマットへ出力
+		# 必要なカラム位置にデータを配置し、その他は空欄やダミー("000")で埋める
+		print $1, "000", zip, "\"\"", "\"\"", town_kana, pref, city, town, "0", "0", "0", "0", "0", "0"
 	}' JIGYOSYO.CSV > JIGYOSYO_CONVERTED.CSV
 	
 	# 結合
@@ -110,8 +118,6 @@ src_prepare() {
 
 	# --- Mozcソースの準備 ---
 	cd "${S}" || die
-	
-	# BazelがPythonを見つけられるようにする
 	python_setup
 }
 
