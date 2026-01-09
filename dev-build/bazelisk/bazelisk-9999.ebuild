@@ -13,6 +13,8 @@ LICENSE="Apache-2.0"
 SLOT="0"
 KEYWORDS=""
 IUSE=""
+# Goモジュールのダウンロードのためにネットワーク制限を解除
+RESTRICT="network-sandbox mirror"
 
 # Go言語が必要です
 BDEPEND=">=dev-lang/go-1.18"
