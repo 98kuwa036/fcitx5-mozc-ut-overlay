@@ -13,7 +13,7 @@ else
 	MOZC_TAG="${PV}"
 fi
 
-# 最新のBazel 8ではWORKSPACEが廃止されるため、安定動作する7.4.1に固定
+# Bazel 8の非互換性を避け、oss_linux設定が確実に動作する 7.4.1 を使用
 export USE_BAZEL_VERSION=7.4.1
 
 DESCRIPTION="Mozc with Fcitx5 support and UT dictionaries (Ken_all + Jigyosyo)"
@@ -107,9 +107,8 @@ src_prepare() {
 	fi
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
-	# ★ Visibility 修正 (Pythonスクリプトによる安全な書き換え) ★
-	# sed での破壊を防ぐため、専用スクリプトを使用
-	einfo "Fixing Bazel visibility using Python..."
+	# ★ Visibility 修正 (重複 package 削除機能付き) ★
+	einfo "Fixing Bazel visibility issues (removing duplicate package decls)..."
 	cat > "${T}/fix_visibility.py" <<EOF
 import sys
 import re
@@ -118,25 +117,61 @@ def fix_file(path):
     with open(path, 'r') as f:
         lines = f.readlines()
     
-    # 全体を公開設定にするヘッダーを追加
-    new_lines = ['package(default_visibility = ["//visibility:public"])\n']
-    skip = False
+    new_lines = []
+    
+    # 挿入すべき package 宣言
+    package_decl = 'package(default_visibility = ["//visibility:public"])\n'
+    
+    skip_mode = False
+    in_load = False
+    insert_pos = 0
     
     for line in lines:
         s = line.strip()
-        # 既存の visibility = [...] ブロックを検出して削除
-        if re.search(r'^\s*visibility\s*=\s*\[', line):
-            if s.endswith('],') or s.endswith(']'):
-                continue # 1行で完結している場合はスキップ
-            skip = True
+        
+        # load() ステートメントの追跡 (package は load の後に置く必要があるため)
+        if s.startswith('load('):
+            in_load = True
+        
+        # 既存の package() 宣言を検出してスキップ（削除）
+        if re.search(r'^\s*package\s*\(', line):
+            if ')' in line:
+                continue # 1行で完結している場合
+            skip_mode = 'package'
             continue
         
-        if skip:
+        if skip_mode == 'package':
+            if ')' in line:
+                skip_mode = False
+            continue
+
+        # 既存の visibility = [...] を検出してスキップ（削除）
+        if re.search(r'^\s*visibility\s*=\s*\[', line):
             if s.endswith('],') or s.endswith(']'):
-                skip = False
+                continue
+            skip_mode = 'visibility'
+            continue
+        
+        if skip_mode == 'visibility':
+            if s.endswith('],') or s.endswith(']'):
+                skip_mode = False
             continue
             
+        # load() が終わったかどうか確認
+        if in_load:
+            if ')' in line:
+                in_load = False
+        
         new_lines.append(line)
+        
+        # load文のブロックが終わった直後を挿入ポイントとする
+        if (s.startswith('load(') or in_load) and not skip_mode:
+             # まだload中なら、挿入ポイントを更新
+             # (load行を追加した後の位置にする)
+             insert_pos = len(new_lines)
+
+    # 適切な位置に package 宣言を挿入
+    new_lines.insert(insert_pos, package_decl)
 
     with open(path, 'w') as f:
         f.writelines(new_lines)
@@ -145,9 +180,10 @@ if __name__ == '__main__':
     for p in sys.argv[1:]:
         fix_file(p)
 EOF
+	# client と session の BUILD ファイルを修正
 	"${EPYTHON}" "${T}/fix_visibility.py" "${S}/src/client/BUILD.bazel" "${S}/src/session/BUILD.bazel" || die
 
-	# WORKSPACE への Fcitx5 定義追加 (これがないと unknown repo エラーになる)
+	# WORKSPACE への Fcitx5 定義追加
 	einfo "Updating WORKSPACE..."
 	cat >> "${S}/src/WORKSPACE" <<EOF
 new_local_repository(
