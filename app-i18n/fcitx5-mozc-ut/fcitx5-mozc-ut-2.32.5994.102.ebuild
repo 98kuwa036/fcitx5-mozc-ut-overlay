@@ -13,7 +13,7 @@ else
 	MOZC_TAG="${PV}"
 fi
 
-# Bazel 8の非互換性を避け、oss_linux設定が確実に動作する 7.4.1 を使用
+# 最新のBazel 8ではWORKSPACEが廃止されるため、安定動作する7.4.1に固定
 export USE_BAZEL_VERSION=7.4.1
 
 DESCRIPTION="Mozc with Fcitx5 support and UT dictionaries (Ken_all + Jigyosyo)"
@@ -108,6 +108,7 @@ src_prepare() {
 	cp -r "${WORKDIR}/fcitx5-mozc/src/unix/fcitx5" "${S}/src/unix/" || die
 
 	# ★ Visibility 修正 (Pythonスクリプトによる安全な書き換え) ★
+	# sed での破壊を防ぐため、専用スクリプトを使用
 	einfo "Fixing Bazel visibility using Python..."
 	cat > "${T}/fix_visibility.py" <<EOF
 import sys
@@ -117,15 +118,16 @@ def fix_file(path):
     with open(path, 'r') as f:
         lines = f.readlines()
     
+    # 全体を公開設定にするヘッダーを追加
     new_lines = ['package(default_visibility = ["//visibility:public"])\n']
     skip = False
     
     for line in lines:
         s = line.strip()
-        # visibility = [...] ブロックの検出とスキップ
+        # 既存の visibility = [...] ブロックを検出して削除
         if re.search(r'^\s*visibility\s*=\s*\[', line):
             if s.endswith('],') or s.endswith(']'):
-                continue # 1行で完結している場合
+                continue # 1行で完結している場合はスキップ
             skip = True
             continue
         
@@ -143,10 +145,9 @@ if __name__ == '__main__':
     for p in sys.argv[1:]:
         fix_file(p)
 EOF
-	# エラーの原因となっていた client と session の BUILD ファイルを修正
 	"${EPYTHON}" "${T}/fix_visibility.py" "${S}/src/client/BUILD.bazel" "${S}/src/session/BUILD.bazel" || die
 
-	# WORKSPACE への Fcitx5 定義追加
+	# WORKSPACE への Fcitx5 定義追加 (これがないと unknown repo エラーになる)
 	einfo "Updating WORKSPACE..."
 	cat >> "${S}/src/WORKSPACE" <<EOF
 new_local_repository(
