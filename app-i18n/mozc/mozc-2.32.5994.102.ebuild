@@ -63,10 +63,6 @@ SRC_URI="
 	https://github.com/bazelbuild/rules_shell/releases/download/v0.3.0/rules_shell-v0.3.0.tar.gz
 	https://github.com/bazelbuild/rules_swift/releases/download/3.1.2/rules_swift.3.1.2.tar.gz
 	https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
-	https://github.com/hiroyuki-komatsu/japanpost_zipcode/raw/33524763837473258e7ba2f14b17fc3a70519831/ken_all.zip
-		-> ${P}-ken_all.zip
-	https://github.com/hiroyuki-komatsu/japanpost_zipcode/raw/33524763837473258e7ba2f14b17fc3a70519831/jigyosyo.zip
-		-> ${P}-jigyosyo.zip
 	https://raw.githubusercontent.com/google/material-design-icons/4.0.0/png/action/chrome_reader_mode/materialiconsoutlined/48dp/1x/outline_chrome_reader_mode_black_48dp.png
 		-> ${P}-dictionary.png
 	https://raw.githubusercontent.com/google/material-design-icons/4.0.0/src/action/chrome_reader_mode/materialiconsoutlined/24px.svg
@@ -205,10 +201,18 @@ src_prepare() {
 
 	# bug #877765
 	restore_config mozcdic-ut.txt
-	if [[ -f /mozcdic-ut.txt && -s mozcdic-ut.txt ]]; then
-		einfo "mozcdic-ut.txt found. Adding to mozc dictionary..."
-		cat mozcdic-ut.txt >> "${S}"/data/dictionary_oss/dictionary00.txt || die
-	fi
+	if [[ -f mozcdic-ut.txt && -s mozcdic-ut.txt ]]; then
+        einfo "mozcdic-ut.txt found. Customizing dictionary..."
+
+        # 1. 標準辞書から住所に関連するエントリを完全に削除して重複を防止
+        # Mozc の dictionary00.txt 内で「地名」や「郵便番号」という品詞・タグを含む行を削除します。
+        einfo "Cleaning up standard place name entries from dictionary00.txt..."
+        sed -i -e '/地名/d' -e '/郵便番号/d' "${S}"/data/dictionary_oss/dictionary00.txt || die
+
+        # 2. UT 辞書（住所・事業所データ入り）を末尾に追加
+        einfo "Merging UT dictionary into clean Mozc dictionary..."
+        cat mozcdic-ut.txt >> "${S}"/data/dictionary_oss/dictionary00.txt || die
+    fi
 
 	# custom the target 'package' defined in unix/BUILD.bazel
 	if ! mozc_icons; then
