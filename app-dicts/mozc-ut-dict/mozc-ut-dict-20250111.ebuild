@@ -16,12 +16,15 @@ SRC_URI="
 	https://www.post.japanpost.jp/zipcode/dl/jigyosyo/zip/jigyosyo.zip
 "
 
+# ★重要: ソースディレクトリをクローン先に指定
+S="${WORKDIR}/merge-ut-dictionaries"
+
 LICENSE="Apache-2.0"
 SLOT="0"
 KEYWORDS="~amd64"
 IUSE=""
 
-# ネットワークアクセス許可 (merge-ut-dictionariesのgit clone等のため)
+# ネットワークアクセス許可 (git clone等のため)
 RESTRICT="network-sandbox mirror"
 
 BDEPEND="
@@ -34,17 +37,17 @@ BDEPEND="
 "
 
 src_unpack() {
-	# 1. 辞書ツールの取得
-	git clone --depth 1 https://github.com/utuhiro78/merge-ut-dictionaries.git || die
+	# 1. 辞書ツールの取得 (クローン)
+	git clone --depth 1 https://github.com/utuhiro78/merge-ut-dictionaries.git "${S}" || die
 	
 	# 2. 郵便番号データの展開
+	# デフォルトの挙動で ${WORKDIR} に展開されます
 	unpack ${A}
 }
 
 src_prepare() {
 	default
-	# 必要なファイルの準備
-	mv merge-ut-dictionaries "${S}" || die
+	# 既存の ebuild で行っていた mv は不要になります (S を直接指定しているため)
 }
 
 src_compile() {
@@ -58,6 +61,7 @@ src_compile() {
 	mkdir -p "${dict_out}"
 
 	# 1. UT辞書の生成
+	# S が merge-ut-dictionaries を指しているため、src はその直下
 	local merge_src="${S}/src"
 	local dicts=(alt-cannadic edict2 jawiki neologd skk-jisyo sudachidict)
 
@@ -77,6 +81,7 @@ src_compile() {
 
 	# 2. 住所+事業所辞書の生成 (カスタムスクリプト)
 	einfo "Generating Place/Jigyosyo dictionary..."
+	# unpack された CSV は WORKDIR 直下にある
 	local ken_csv=$(find "${WORKDIR}" -maxdepth 1 -iname 'ken_all.csv' | head -n1)
 	local jigyo_csv=$(find "${WORKDIR}" -maxdepth 1 -iname 'jigyosyo.csv' | head -n1)
 	
